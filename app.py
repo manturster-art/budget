@@ -13,17 +13,17 @@ import os
 def authenticate_gdrive_with_secrets():
     gauth = GoogleAuth()
 
-    # Streamlit Secrets에서 데이터를 직접 가져와 설정
-    # 박사님의 서비스 계정 정보가 메모리상에서 바로 전달됩니다.
-    credentials = dict(st.secrets["gdrive"])
-
-    settings = {
+# 💡 [핵심 수정] 메서드 대신 settings 딕셔너리에 직접 설정을 업데이트합니다.
+    # 이 방식이 Streamlit Secrets와 PyDrive2를 조합할 때 가장 에러가 적습니다.
+    gauth.settings.update({
         "client_config_backend": "service",
         "service_config": {
-            "client_json_dict": credentials, # 파일 경로 대신 딕셔너리(dict) 전달
+            "client_json_dict": dict(st.secrets["gdrive"]), # Secrets 정보를 딕셔너리로 변환
         }
-    }
-    gauth.LoadCredentialsFromSettings(settings)
+    })
+    
+    # 💡 주입된 설정을 기반으로 서비스 계정 인증을 수행합니다.
+    gauth.ServiceAuth() 
     return GoogleDrive(gauth)
 
 # 💡 파일 업로드/업데이트 함수
@@ -397,3 +397,4 @@ with tab2:
                 file_name="budget_text_final_result.csv",
                 mime="text/csv"
             )
+
