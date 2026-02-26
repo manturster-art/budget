@@ -229,15 +229,13 @@ with tab2:
             with ThreadPoolExecutor(max_workers=10) as executor:
                 futures = [executor.submit(fetch_text_data, row) for row in target_records]
                 
-                for i, future in enumerate(as_completed(futures), 1):
-                    result = future.result()
-                    if result:
-                        extracted_texts.append(result)
-                    
-                    progress = int((i / len(target_records)) * 100)
-                    progress_bar.progress(progress)
-                    status_text.text(f"추출 진행 중... ({i} / {len(target_records)} 건 완료)")
-                    time.sleep(0.02)
+               for i, future in enumerate(as_completed(futures), 1):
+  		  # (중략...)
+  		  # 🌟 핵심: 100건 단위로만 화면을 갱신해서 웹 브라우저의 과부하를 막습니다!
+     if i % 100 == 0 or i == len(target_records):
+     progress = int((i / len(target_records)) * 100)
+     progress_bar.progress(progress)
+     status_text.text(f"🚀 초고속 추출 중... ({i} / {len(target_records)} 건 완료)")
             
             if extracted_texts:
                 df_result = pd.DataFrame(extracted_texts)
