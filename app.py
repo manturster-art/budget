@@ -12,6 +12,7 @@ st.set_page_config(page_title="지방재정365 크롤러", page_icon="🏛️", 
 st.title("🏛️ 지방재정365 세부사업 데이터 수집기")
 st.markdown("""
 이 웹 프로그램은 지방재정365 내부 API를 활용하여 원하는 지역의 세부사업 목록과 사업개요 텍스트를 **초고속 병렬 처리**로 수집합니다.
+*(대규모 데이터 처리를 위해 화면 렌더링을 최적화한 버전입니다)*
 """)
 
 tab1, tab2 = st.tabs(["[1단계] 사업목록 및 결산액 추출", "[2단계] 사업개요 텍스트 추출"])
@@ -56,7 +57,7 @@ def fetch_region_data(region, year, api_key):
             
             if len(items) < 1000: break
             pIndex += 1
-            time.sleep(0.1) 
+            time.sleep(0.05) 
             
         except Exception as e:
             break
@@ -79,11 +80,9 @@ with tab1:
         
     region_file = st.file_uploader("🗺️ 지역코드 파일 업로드 (예: code_2024.csv)", type=['csv', 'xlsx'])
     
-    # 🌟 지역 선택 변수 초기화
     selected_sido = []
     df_region = pd.DataFrame()
     
-    # 파일이 업로드되면 즉시 읽어서 광역단위 목록을 표시합니다!
     if region_file is not None:
         try:
             if region_file.name.endswith('.csv'):
@@ -93,7 +92,6 @@ with tab1:
                 
             if '지역' in df_region.columns:
                 unique_sido = df_region['지역'].dropna().unique().tolist()
-                # 사용자가 원하는 지역만 다중 선택할 수 있도록 UI 제공 (기본값: 전체 선택)
                 selected_sido = st.multiselect("📍 수집할 광역 단위 선택 (여러 개 선택 가능)", unique_sido, default=unique_sido)
             else:
                 st.warning("업로드된 파일에 '지역' 컬럼이 없어 전체 지자체를 대상으로 합니다.")
@@ -111,7 +109,6 @@ with tab1:
             st.error("수집할 광역 단위를 최소 1개 이상 선택해주세요!")
         else:
             with st.spinner("선택하신 지역의 병렬 추출을 준비합니다..."):
-                # 선택한 광역 단위만 필터링!
                 if selected_sido:
                     df_region_filtered = df_region[df_region['지역'].isin(selected_sido)]
                 else:
@@ -134,9 +131,12 @@ with tab1:
                             target_list.extend(result_data)
                             
                         completed_count += 1
-                        prog_bar_1.progress(int((completed_count / len(unique_regions)) * 100))
-                        status_1.text(f"병렬 수집 중... [{completed_count}/{len(unique_regions)}] '{region_name}' 수집 완료")
-                        time.sleep(0.05)
+                        
+                        # 🌟 UI 렌더링 최적화: 10개 지자체 단위로 화면 갱신
+                        if completed_count % 10 == 0 or completed_count == len(unique_regions):
+                            prog_bar_1.progress(int((completed_count / len(unique_regions)) * 100))
+                            status_1.text(f"🚀 병렬 수집 중... [{completed_count}/{len(unique_regions)}] 수집 완료")
+                        time.sleep(0.01)
                 
                 if target_list:
                     df_step1 = pd.DataFrame(target_list).drop_duplicates(subset=['회계연도', '지자체코드', '세부사업코드'])
@@ -145,7 +145,6 @@ with tab1:
                     st.dataframe(df_step1.head(10)) 
                     
                     csv_step1 = df_step1.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
-                    # 저장할 파일 이름에 선택한 지역을 표시해 줍니다.
                     region_tag = "전체" if len(selected_sido) > 3 else "_".join(selected_sido)
                     st.download_button(
                         label="📥 1단계 결과 다운로드 (CSV)",
@@ -195,7 +194,7 @@ def fetch_text_data(row):
     }
     
     try:
-        response = requests.post(url, data=payload, impersonate="chrome", timeout=15)
+        response = requests.post(url, data=payload, impersonate="chrome", timeout=20) # 안정성을 위해 20초로 상향
         return {
             '회계연도': year, '지자체코드': laf_cd, '세부사업코드': dbiz_cd,
             '사업목적': extract_clean_text(response.text, '사업목적'),
@@ -229,13 +228,17 @@ with tab2:
             with ThreadPoolExecutor(max_workers=10) as executor:
                 futures = [executor.submit(fetch_text_data, row) for row in target_records]
                 
-               for i, future in enumerate(as_completed(futures), 1):
-  		  # (중략...)
-  		  # 🌟 핵심: 100건 단위로만 화면을 갱신해서 웹 브라우저의 과부하를 막습니다!
-     if i % 100 == 0 or i == len(target_records):
-     progress = int((i / len(target_records)) * 100)
-     progress_bar.progress(progress)
-     status_text.text(f"🚀 초고속 추출 중... ({i} / {len(target_records)} 건 완료)")
+                for i, future in enumerate(as_completed(futures), 1):
+                    result = future.result()
+                    if result:
+                        extracted_texts.append(result)
+                    
+                    # 🌟 UI 렌더링 최적화: 100건 단위로 화면 갱신하여 멈춤 현상(Freeze) 방지!
+                    if i % 100 == 0 or i == len(target_records):
+                        progress = int((i / len(target_records)) * 100)
+                        progress_bar.progress(progress)
+                        status_text.text(f"🚀 초고속 추출 중... ({i} / {len(target_records)} 건 완료)")
+                    time.sleep(0.01) # 통신 딜레이 최소화
             
             if extracted_texts:
                 df_result = pd.DataFrame(extracted_texts)
