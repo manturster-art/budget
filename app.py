@@ -5,6 +5,46 @@ from bs4 import BeautifulSoup, SoupStrainer
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from pydrive2.auth import GoogleAuth
+from pydrive2.drive import GoogleDrive
+import os
+
+# 💡 구글 드라이브 인증 함수
+def authenticate_gdrive_with_secrets():
+    gauth = GoogleAuth()
+
+    # Streamlit Secrets에서 데이터를 직접 가져와 설정
+    # 박사님의 서비스 계정 정보가 메모리상에서 바로 전달됩니다.
+    credentials = dict(st.secrets["gdrive"])
+
+    settings = {
+        "client_config_backend": "service",
+        "service_config": {
+            "client_json_dict": credentials, # 파일 경로 대신 딕셔너리(dict) 전달
+        }
+    }
+    gauth.LoadCredentialsFromSettings(settings)
+    return GoogleDrive(gauth)
+
+# 💡 파일 업로드/업데이트 함수
+def upload_to_gdrive(drive, local_path, folder_id):
+    # 폴더 내에 동일한 이름의 파일이 있는지 확인 (있으면 덮어쓰기)
+    file_list = drive.ListFile({'q': f"'{folder_id}' in parents and trashed=false"}).GetList()
+    
+    target_file = None
+    for file in file_list:
+        if file['title'] == os.path.basename(local_path):
+            target_file = file
+            break
+            
+    if target_file:
+        target_file.SetContentFile(local_path)
+    else:
+        target_file = drive.CreateFile({'title': os.path.basename(local_path), 'parents': [{'id': folder_id}]})
+        target_file.SetContentFile(local_path)
+    
+    target_file.Upload()
+
 # ---------------------------------------------------------
 # 기본 웹페이지 설정 및 최적화 세션
 # ---------------------------------------------------------
@@ -323,9 +363,25 @@ with tab2:
                     
                     # 💡 2. [물리적 백업 저장]: 디스크 I/O 병목(속도 저하)을 방지하기 위해 1000건마다 1번씩만 몰아서 파일 저장
                     if completed_in_this_run % 1000 == 0 or completed_in_this_run == total_to_fetch:
-                        status_text.text(f"🚀 데이터 추출 중... ({completed_in_this_run} / {total_to_fetch} 건 완료) - 💾 1000건 단위 하드디스크 백업 완료!")
-                        pd.DataFrame(target_records).to_csv("[자동저장]_2단계_텍스트추출_백업.csv", index=False, encoding='utf-8-sig')
+                        local_path = "[자동저장]_2단계_텍스트추출_백업.csv"
                         
+                        # 1. 로컬 하드디스크에 먼저 저장 (안전 장치)
+                        pd.DataFrame(target_records).to_csv(local_path, index=False, encoding='utf-8-sig')
+                        status_text.text(f"🚀 {completed_in_this_run}/{total_to_fetch} 완료 - 💾 로컬 백업 완료!")
+
+                        # 2. Google Drive 실시간 업로드 (Secrets 인증 방식)
+                        try:
+                            # ⚠️ 상단에 정의한 'authenticate_gdrive_with_secrets' 함수를 사용합니다.
+                            drive = authenticate_gdrive_with_secrets() 
+                            
+                            # ⚠️ '박사님의_폴더_ID' 부분을 실제 구글 드라이브 폴더 ID로 꼭 수정하세요!
+                            upload_to_gdrive(drive, local_path, "3NekjB0SM39VhTsw74lcTMGyPREOEDEU")
+                            
+                            status_text.text(f"🚀 {completed_in_this_run}/{total_to_fetch} 완료 - ☁️ Google Drive 업로드 성공!")
+                        except Exception as e:
+                            # 업로드 실패 시에도 로컬 저장은 완료된 상태이므로 경고만 표시
+                            st.warning(f"⚠️ 구글 드라이브 업로드 중 오류 발생 (로컬 저장은 안전함): {e}")                        
+
                     time.sleep(0.01)
             
             status_text.text("✅ 추출 완료!")
