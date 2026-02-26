@@ -2,4 +2,6 @@ streamlit
 pandas
 beautifulsoup4
 curl_cffi
+lxml
+PyDrive2
 openpyxl
